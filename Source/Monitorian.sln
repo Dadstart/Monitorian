@@ -25,9 +25,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StartupAgency", "StartupAgency\StartupAgency.csproj", "{F44EA754-E653-4696-8A12-C86224292908}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Monitorian.CLI", "Monitorian.CLI\Monitorian.CLI.csproj", "{B5C8D9E2-F1A3-4B6C-8D7E-9F0A1B2C3D4E}"
-	ProjectSection(ProjectDependencies) = postProject
-		{0C509B78-FF37-4F5D-9582-189EE5316C27} = {0C509B78-FF37-4F5D-9582-189EE5316C27}
-	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
