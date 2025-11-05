@@ -36,10 +36,10 @@ class Program
                 case "set":
                     if (args.Length < 3)
                     {
-                        Console.WriteLine("Usage: monitorian-cli set <brightness|contrast> <value> [monitor-id]");
+                        Console.WriteLine("Usage: monitorian-cli set <brightness|contrast> <value> [brightness|contrast <value>]... [monitor-id]");
                         return 1;
                     }
-                    await SetValue(args[1], args[2], args.Length > 3 ? args[3] : null);
+                    await SetMultipleValues(args.Skip(1).ToArray());
                     break;
                 default:
                     Console.WriteLine($"Unknown command: {command}");
@@ -63,13 +63,15 @@ class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  monitorian-cli list                                           - List all monitors");
         Console.WriteLine("  monitorian-cli get <brightness|contrast> [monitor-id]         - Get current values");
-        Console.WriteLine("  monitorian-cli set <brightness|contrast> <value> [monitor-id] - Set values");
+        Console.WriteLine("  monitorian-cli set <brightness|contrast> <value> [brightness|contrast <value>]... [monitor-id] - Set values");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  monitorian-cli list");
         Console.WriteLine("  monitorian-cli get brightness");
         Console.WriteLine("  monitorian-cli set brightness 50");
         Console.WriteLine("  monitorian-cli set contrast 75");
+        Console.WriteLine("  monitorian-cli set brightness 50 contrast 75");
+        Console.WriteLine("  monitorian-cli set brightness 50 contrast 75 <monitor-id>");
     }
 
     static async Task ListMonitors()
@@ -144,15 +146,67 @@ class Program
         }
     }
 
-    static async Task SetValue(string type, string value, string monitorId)
+    static async Task SetMultipleValues(string[] args)
     {
-        var monitors = await GetMonitorsAsync();
+        // Parse arguments into type-value pairs and optional monitor-id
+        var settings = new List<(string type, int value)>();
+        string monitorId = null;
 
-        if (!int.TryParse(value, out int intValue) || intValue < 0 || intValue > 100)
+        int i = 0;
+        while (i < args.Length)
         {
-            Console.Error.WriteLine("Value must be a number between 0 and 100.");
+            string arg = args[i].ToLower();
+
+            // Check if this is a type (brightness or contrast)
+            if (arg == "brightness" || arg == "contrast")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine($"Missing value for {arg}.");
+                    return;
+                }
+
+                if (!int.TryParse(args[i + 1], out int value) || value < 0 || value > 100)
+                {
+                    Console.Error.WriteLine($"Value for {arg} must be a number between 0 and 100.");
+                    return;
+                }
+
+                settings.Add((arg, value));
+                i += 2;
+            }
+            else
+            {
+                // If it's not a type, assume it's the monitor-id (must be last argument)
+                if (i == args.Length - 1)
+                {
+                    monitorId = args[i];
+                    break;
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Unexpected argument: {args[i]}. Expected 'brightness', 'contrast', or monitor-id.");
+                    return;
+                }
+            }
+        }
+
+        if (settings.Count == 0)
+        {
+            Console.Error.WriteLine("No valid settings specified. Use 'brightness <value>' and/or 'contrast <value>'.");
             return;
         }
+
+        // Execute each setting
+        foreach (var (type, value) in settings)
+        {
+            await SetValue(type, value, monitorId);
+        }
+    }
+
+    static async Task SetValue(string type, int value, string monitorId)
+    {
+        var monitors = await GetMonitorsAsync();
 
         var targetMonitors = string.IsNullOrEmpty(monitorId)
             ? monitors
@@ -166,11 +220,11 @@ class Program
             if (type == "brightness" && monitor.IsBrightnessSupported && monitor.IsReachable)
             {
                 totalCount++;
-                var result = monitor.SetBrightness(intValue);
+                var result = monitor.SetBrightness(value);
                 if (result.Status == AccessStatus.Succeeded)
                 {
                     successCount++;
-                    Console.WriteLine($"✓ Set brightness to {intValue} for {monitor.Description}");
+                    Console.WriteLine($"✓ Set brightness to {value} for {monitor.Description}");
                 }
                 else
                 {
@@ -180,11 +234,11 @@ class Program
             else if (type == "contrast" && monitor.IsContrastSupported && monitor.IsReachable)
             {
                 totalCount++;
-                var result = monitor.SetContrast(intValue);
+                var result = monitor.SetContrast(value);
                 if (result.Status == AccessStatus.Succeeded)
                 {
                     successCount++;
-                    Console.WriteLine($"✓ Set contrast to {intValue} for {monitor.Description}");
+                    Console.WriteLine($"✓ Set contrast to {value} for {monitor.Description}");
                 }
                 else
                 {
