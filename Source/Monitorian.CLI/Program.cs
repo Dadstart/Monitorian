@@ -28,10 +28,10 @@ class Program
                 case "get":
                     if (args.Length < 2)
                     {
-                        Console.WriteLine("Usage: monitorian-cli get <brightness|contrast> [monitor-id]");
+                        Console.WriteLine("Usage: monitorian-cli get <brightness|contrast> [brightness|contrast]... [monitor-id]");
                         return 1;
                     }
-                    await GetValue(args[1], args.Length > 2 ? args[2] : null);
+                    await GetMultipleValues(args.Skip(1).ToArray());
                     break;
                 case "set":
                     if (args.Length < 3)
@@ -62,12 +62,14 @@ class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  monitorian-cli list                                           - List all monitors");
-        Console.WriteLine("  monitorian-cli get <brightness|contrast> [monitor-id]         - Get current values");
+        Console.WriteLine("  monitorian-cli get <brightness|contrast> [brightness|contrast]... [monitor-id] - Get current values");
         Console.WriteLine("  monitorian-cli set <brightness|contrast> <value> [brightness|contrast <value>]... [monitor-id] - Set values");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  monitorian-cli list");
         Console.WriteLine("  monitorian-cli get brightness");
+        Console.WriteLine("  monitorian-cli get brightness contrast");
+        Console.WriteLine("  monitorian-cli get brightness contrast <monitor-id>");
         Console.WriteLine("  monitorian-cli set brightness 50");
         Console.WriteLine("  monitorian-cli set contrast 75");
         Console.WriteLine("  monitorian-cli set brightness 50 contrast 75");
@@ -97,6 +99,55 @@ class Program
             Console.WriteLine($"Contrast: {(monitor.IsContrastSupported ? $"{monitor.Contrast}%" : "Not supported")}");
             Console.WriteLine($"Reachable: {(monitor.IsReachable ? "Yes" : "No")}");
             Console.WriteLine();
+        }
+    }
+
+    static async Task GetMultipleValues(string[] args)
+    {
+        // Parse arguments into types and optional monitor-id
+        var types = new List<string>();
+        string monitorId = null;
+
+        int i = 0;
+        while (i < args.Length)
+        {
+            string arg = args[i].ToLower();
+
+            // Check if this is a type (brightness or contrast)
+            if (arg == "brightness" || arg == "contrast")
+            {
+                if (!types.Contains(arg))
+                {
+                    types.Add(arg);
+                }
+                i++;
+            }
+            else
+            {
+                // If it's not a type, assume it's the monitor-id (must be last argument)
+                if (i == args.Length - 1)
+                {
+                    monitorId = args[i];
+                    break;
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Unexpected argument: {args[i]}. Expected 'brightness', 'contrast', or monitor-id.");
+                    return;
+                }
+            }
+        }
+
+        if (types.Count == 0)
+        {
+            Console.Error.WriteLine("No valid types specified. Use 'brightness' and/or 'contrast'.");
+            return;
+        }
+
+        // Execute each type
+        foreach (var type in types)
+        {
+            await GetValue(type, monitorId);
         }
     }
 
