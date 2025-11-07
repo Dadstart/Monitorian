@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.Linq;
 using System.Threading.Tasks;
@@ -15,15 +16,29 @@ class Program
         Contrast
     }
 
-    static Task<int> Main(string[] args)
+    static Task<int> Main(string[] args) =>
+        BuildCommandLineParser().InvokeAsync(args);
+
+    private static Parser BuildCommandLineParser()
     {
         var rootCommand = BuildCommandLine();
-        return rootCommand.InvokeAsync(args);
+
+        return new CommandLineBuilder(rootCommand)
+            .UseDefaults()
+            .UseExceptionHandler((exception, context) =>
+            {
+                Console.Error.WriteLine(exception.Message);
+                context.ExitCode = 1;
+            })
+            .Build();
     }
 
     private static RootCommand BuildCommandLine()
     {
-        var rootCommand = new RootCommand("Monitorian CLI - Control monitor brightness and contrast.");
+        var rootCommand = new RootCommand("Monitorian CLI - Control monitor brightness and contrast.")
+        {
+            TreatUnmatchedTokensAsErrors = true
+        };
 
         rootCommand.AddCommand(BuildListCommand());
         rootCommand.AddCommand(BuildGetCommand());
