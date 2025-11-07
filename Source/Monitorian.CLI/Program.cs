@@ -1,82 +1,159 @@
 using System;
 using System.Collections.Generic;
+using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace Monitorian.CLI;
 
 class Program
 {
-    static async Task<int> Main(string[] args)
+    private enum ControlType
     {
-        if (args.Length == 0)
-        {
-            ShowHelp();
-            return 0;
-        }
+        Brightness,
+        Contrast
+    }
 
-        try
-        {
-            var command = args[0].ToLower();
+    static Task<int> Main(string[] args)
+    {
+        var rootCommand = BuildCommandLine();
+        return rootCommand.InvokeAsync(args);
+    }
 
-            switch (command)
+    private static RootCommand BuildCommandLine()
+    {
+        var rootCommand = new RootCommand("Monitorian CLI - Control monitor brightness and contrast.");
+
+        rootCommand.AddCommand(BuildListCommand());
+        rootCommand.AddCommand(BuildGetCommand());
+        rootCommand.AddCommand(BuildSetCommand());
+
+        return rootCommand;
+    }
+
+    private static Command BuildListCommand()
+    {
+        var command = new Command("list", "List available monitors and their capabilities.");
+        command.SetHandler(async () => await ListMonitors());
+        return command;
+    }
+
+    private static Command BuildGetCommand()
+    {
+        var command = new Command("get", "Get brightness and/or contrast values.");
+
+        var brightnessOption = new Option<bool>(aliases: new[] { "--brightness", "-b" }, description: "Get brightness values.");
+        var contrastOption = new Option<bool>(aliases: new[] { "--contrast", "-c" }, description: "Get contrast values.");
+        var monitorOption = CreateMonitorOption();
+
+        command.AddOption(brightnessOption);
+        command.AddOption(contrastOption);
+        command.AddOption(monitorOption);
+
+        command.AddValidator(result =>
+        {
+            var brightness = result.GetValueForOption(brightnessOption);
+            var contrast = result.GetValueForOption(contrastOption);
+
+            if (!brightness && !contrast)
             {
-                case "list":
-                    await ListMonitors();
-                    break;
-                case "get":
-                    if (args.Length < 2)
-                    {
-                        Console.WriteLine("Usage: monitorian-cli get <brightness|contrast> [brightness|contrast]... [monitor-id]");
-                        return 1;
-                    }
-                    await GetMultipleValues(args.Skip(1).ToArray());
-                    break;
-                case "set":
-                    if (args.Length < 3)
-                    {
-                        Console.WriteLine("Usage: monitorian-cli set <brightness|contrast> <value> [brightness|contrast <value>]... [monitor-id]");
-                        return 1;
-                    }
-                    await SetMultipleValues(args.Skip(1).ToArray());
-                    break;
-                default:
-                    Console.WriteLine($"Unknown command: {command}");
-                    ShowHelp();
-                    return 1;
+                result.ErrorMessage = "Specify at least one of --brightness or --contrast.";
             }
-        }
-        catch (Exception ex)
+        });
+
+        command.SetHandler(async (bool brightness, bool contrast, string? monitorId) =>
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            return 1;
-        }
+            var types = new List<ControlType>();
+            if (brightness)
+            {
+                types.Add(ControlType.Brightness);
+            }
 
-        return 0;
+            if (contrast)
+            {
+                types.Add(ControlType.Contrast);
+            }
+
+            foreach (var type in types)
+            {
+                await GetValue(type, monitorId);
+            }
+        }, brightnessOption, contrastOption, monitorOption);
+
+        return command;
     }
 
-    static void ShowHelp()
+    private static Command BuildSetCommand()
     {
-        Console.WriteLine("Monitorian CLI - Command-line tool for controlling monitor brightness and contrast");
-        Console.WriteLine();
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  monitorian-cli list                                           - List all monitors");
-        Console.WriteLine("  monitorian-cli get <brightness|contrast> [brightness|contrast]... [monitor-id] - Get current values");
-        Console.WriteLine("  monitorian-cli set <brightness|contrast> <value> [brightness|contrast <value>]... [monitor-id] - Set values");
-        Console.WriteLine();
-        Console.WriteLine("Examples:");
-        Console.WriteLine("  monitorian-cli list");
-        Console.WriteLine("  monitorian-cli get brightness");
-        Console.WriteLine("  monitorian-cli get brightness contrast");
-        Console.WriteLine("  monitorian-cli get brightness contrast <monitor-id>");
-        Console.WriteLine("  monitorian-cli set brightness 50");
-        Console.WriteLine("  monitorian-cli set contrast 75");
-        Console.WriteLine("  monitorian-cli set brightness 50 contrast 75");
-        Console.WriteLine("  monitorian-cli set brightness 50 contrast 75 <monitor-id>");
+        var command = new Command("set", "Set brightness and/or contrast values.");
+
+        var brightnessOption = new Option<int?>(aliases: new[] { "--brightness", "-b" }, description: "Set brightness to a value between 0 and 100.");
+        var contrastOption = new Option<int?>(aliases: new[] { "--contrast", "-c" }, description: "Set contrast to a value between 0 and 100.");
+        var monitorOption = CreateMonitorOption();
+
+        AddPercentageValidator(brightnessOption, "Brightness");
+        AddPercentageValidator(contrastOption, "Contrast");
+
+        command.AddOption(brightnessOption);
+        command.AddOption(contrastOption);
+        command.AddOption(monitorOption);
+
+        command.AddValidator(result =>
+        {
+            var brightness = result.GetValueForOption(brightnessOption);
+            var contrast = result.GetValueForOption(contrastOption);
+
+            if (brightness is null && contrast is null)
+            {
+                result.ErrorMessage = "Specify at least one of --brightness or --contrast.";
+            }
+        });
+
+        command.SetHandler(async (int? brightness, int? contrast, string? monitorId) =>
+        {
+            var requests = new List<(ControlType type, int value)>();
+
+            if (brightness is int brightnessValue)
+            {
+                requests.Add((ControlType.Brightness, brightnessValue));
+            }
+
+            if (contrast is int contrastValue)
+            {
+                requests.Add((ControlType.Contrast, contrastValue));
+            }
+
+            foreach (var (type, value) in requests)
+            {
+                await SetValue(type, value, monitorId);
+            }
+        }, brightnessOption, contrastOption, monitorOption);
+
+        return command;
     }
 
-    static async Task ListMonitors()
+    private static Option<string?> CreateMonitorOption()
+    {
+        return new Option<string?>(aliases: new[] { "--monitor", "-m" }, description: "Target monitor device instance ID.")
+        {
+            Arity = ArgumentArity.ZeroOrOne
+        };
+    }
+
+    private static void AddPercentageValidator(Option<int?> option, string label)
+    {
+        option.AddValidator(result =>
+        {
+            var value = result.GetValueOrDefault<int?>();
+            if (value is { } typedValue && (typedValue < 0 || typedValue > 100))
+            {
+                result.ErrorMessage = $"{label} value must be between 0 and 100.";
+            }
+        });
+    }
+
+    private static async Task ListMonitors()
     {
         Console.WriteLine("Scanning for monitors...");
 
@@ -102,164 +179,54 @@ class Program
         }
     }
 
-    static async Task GetMultipleValues(string[] args)
-    {
-        // Parse arguments into types and optional monitor-id
-        var types = new List<string>();
-        string monitorId = null;
-
-        int i = 0;
-        while (i < args.Length)
-        {
-            string arg = args[i].ToLower();
-
-            // Check if this is a type (brightness or contrast)
-            if (arg == "brightness" || arg == "contrast")
-            {
-                if (!types.Contains(arg))
-                {
-                    types.Add(arg);
-                }
-                i++;
-            }
-            else
-            {
-                // If it's not a type, assume it's the monitor-id (must be last argument)
-                if (i == args.Length - 1)
-                {
-                    monitorId = args[i];
-                    break;
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Unexpected argument: {args[i]}. Expected 'brightness', 'contrast', or monitor-id.");
-                    return;
-                }
-            }
-        }
-
-        if (types.Count == 0)
-        {
-            Console.Error.WriteLine("No valid types specified. Use 'brightness' and/or 'contrast'.");
-            return;
-        }
-
-        // Execute each type
-        foreach (var type in types)
-        {
-            await GetValue(type, monitorId);
-        }
-    }
-
-    static async Task GetValue(string type, string monitorId)
+    private static async Task GetValue(ControlType type, string? monitorId)
     {
         var monitors = await GetMonitorsAsync();
 
-        if (string.IsNullOrEmpty(monitorId))
+        if (string.IsNullOrWhiteSpace(monitorId))
         {
-            // Get all monitors
             foreach (var monitor in monitors)
             {
-                if (type == "brightness" && monitor.IsBrightnessSupported)
+                if (type == ControlType.Brightness && monitor.IsBrightnessSupported)
                 {
                     Console.WriteLine($"{monitor.DeviceInstanceId} {monitor.Description} {monitor.Brightness} B");
                 }
-                else if (type == "contrast" && monitor.IsContrastSupported)
+                else if (type == ControlType.Contrast && monitor.IsContrastSupported)
                 {
                     Console.WriteLine($"{monitor.DeviceInstanceId} {monitor.Description} {monitor.Contrast} C");
                 }
             }
-        }
-        else
-        {
-            // Get specific monitor
-            var monitor = monitors.FirstOrDefault(m =>
-                string.Equals(m.DeviceInstanceId, monitorId, StringComparison.OrdinalIgnoreCase));
-
-            if (monitor == null)
-            {
-                Console.Error.WriteLine($"Monitor with ID '{monitorId}' not found.");
-                return;
-            }
-
-            if (type == "brightness" && monitor.IsBrightnessSupported)
-            {
-                Console.WriteLine($"{monitor.DeviceInstanceId} {monitor.Description} {monitor.Brightness} B");
-            }
-            else if (type == "contrast" && monitor.IsContrastSupported)
-            {
-                Console.WriteLine($"{monitor.DeviceInstanceId} {monitor.Description} {monitor.Contrast} C");
-            }
-            else
-            {
-                Console.Error.WriteLine($"Monitor does not support {type} control.");
-            }
-        }
-    }
-
-    static async Task SetMultipleValues(string[] args)
-    {
-        // Parse arguments into type-value pairs and optional monitor-id
-        var settings = new List<(string type, int value)>();
-        string monitorId = null;
-
-        int i = 0;
-        while (i < args.Length)
-        {
-            string arg = args[i].ToLower();
-
-            // Check if this is a type (brightness or contrast)
-            if (arg == "brightness" || arg == "contrast")
-            {
-                if (i + 1 >= args.Length)
-                {
-                    Console.Error.WriteLine($"Missing value for {arg}.");
-                    return;
-                }
-
-                if (!int.TryParse(args[i + 1], out int value) || value < 0 || value > 100)
-                {
-                    Console.Error.WriteLine($"Value for {arg} must be a number between 0 and 100.");
-                    return;
-                }
-
-                settings.Add((arg, value));
-                i += 2;
-            }
-            else
-            {
-                // If it's not a type, assume it's the monitor-id (must be last argument)
-                if (i == args.Length - 1)
-                {
-                    monitorId = args[i];
-                    break;
-                }
-                else
-                {
-                    Console.Error.WriteLine($"Unexpected argument: {args[i]}. Expected 'brightness', 'contrast', or monitor-id.");
-                    return;
-                }
-            }
-        }
-
-        if (settings.Count == 0)
-        {
-            Console.Error.WriteLine("No valid settings specified. Use 'brightness <value>' and/or 'contrast <value>'.");
             return;
         }
 
-        // Execute each setting
-        foreach (var (type, value) in settings)
+        var monitorMatch = monitors.FirstOrDefault(m =>
+            string.Equals(m.DeviceInstanceId, monitorId, StringComparison.OrdinalIgnoreCase));
+
+        if (monitorMatch is null)
         {
-            await SetValue(type, value, monitorId);
+            Console.Error.WriteLine($"Monitor with ID '{monitorId}' not found.");
+            return;
+        }
+
+        if (type == ControlType.Brightness && monitorMatch.IsBrightnessSupported)
+        {
+            Console.WriteLine($"{monitorMatch.DeviceInstanceId} {monitorMatch.Description} {monitorMatch.Brightness} B");
+        }
+        else if (type == ControlType.Contrast && monitorMatch.IsContrastSupported)
+        {
+            Console.WriteLine($"{monitorMatch.DeviceInstanceId} {monitorMatch.Description} {monitorMatch.Contrast} C");
+        }
+        else
+        {
+            Console.Error.WriteLine($"Monitor does not support {GetLabel(type)} control.");
         }
     }
 
-    static async Task SetValue(string type, int value, string monitorId)
+    private static async Task SetValue(ControlType type, int value, string? monitorId)
     {
         var monitors = await GetMonitorsAsync();
 
-        var targetMonitors = string.IsNullOrEmpty(monitorId)
+        var targetMonitors = string.IsNullOrWhiteSpace(monitorId)
             ? monitors
             : monitors.Where(m => string.Equals(m.DeviceInstanceId, monitorId, StringComparison.OrdinalIgnoreCase));
 
@@ -268,7 +235,7 @@ class Program
 
         foreach (var monitor in targetMonitors)
         {
-            if (type == "brightness" && monitor.IsBrightnessSupported && monitor.IsReachable)
+            if (type == ControlType.Brightness && monitor.IsBrightnessSupported && monitor.IsReachable)
             {
                 totalCount++;
                 var result = monitor.SetBrightness(value);
@@ -282,7 +249,7 @@ class Program
                     Console.Error.WriteLine($"✗ Failed to set brightness for {monitor.Description}: {result.Message}");
                 }
             }
-            else if (type == "contrast" && monitor.IsContrastSupported && monitor.IsReachable)
+            else if (type == ControlType.Contrast && monitor.IsContrastSupported && monitor.IsReachable)
             {
                 totalCount++;
                 var result = monitor.SetContrast(value);
@@ -300,15 +267,23 @@ class Program
 
         if (totalCount == 0)
         {
-            Console.Error.WriteLine($"No controllable monitors found for {type}.");
+            Console.Error.WriteLine($"No controllable monitors found for {GetLabel(type)}.");
         }
         else
         {
-            Console.WriteLine($"Set {type} for {successCount}/{totalCount} monitors");
+            Console.WriteLine($"Set {GetLabel(type)} for {successCount}/{totalCount} monitors");
         }
     }
 
-    static async Task<List<IMonitor>> GetMonitorsAsync()
+    private static string GetLabel(ControlType type) =>
+        type switch
+        {
+            ControlType.Brightness => "brightness",
+            ControlType.Contrast => "contrast",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+        };
+
+    private static async Task<List<IMonitor>> GetMonitorsAsync()
     {
         var monitors = await MonitorManager.EnumerateMonitorsAsync(TimeSpan.FromSeconds(10));
         return monitors.ToList();

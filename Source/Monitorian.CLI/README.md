@@ -19,25 +19,22 @@ A command-line interface for controlling monitor brightness and contrast using D
 monitorian-cli list
 
 # Get brightness from all monitors
-monitorian-cli get brightness
+monitorian-cli get --brightness
+
+# Get brightness and contrast from the same command
+monitorian-cli get --brightness --contrast
 
 # Get brightness from a specific monitor
-monitorian-cli get brightness "MONITOR\\DISPLAY1\\4&12345678&0&UID1"
-
-# Get contrast from all monitors
-monitorian-cli get contrast
+monitorian-cli get --brightness --monitor "MONITOR\\DISPLAY1\\4&12345678&0&UID1"
 
 # Set brightness for all monitors to 50%
-monitorian-cli set brightness all 50
+monitorian-cli set --brightness 50
 
-# Set brightness for a specific monitor to 75%
-monitorian-cli set brightness "MONITOR\\DISPLAY1\\4&12345678&0&UID1" 75
+# Set brightness for a specific monitor
+monitorian-cli set --brightness 75 --monitor "MONITOR\\DISPLAY1\\4&12345678&0&UID1"
 
-# Increase brightness by 10 for all monitors
-monitorian-cli set brightness all +10
-
-# Decrease contrast by 5 for a specific monitor
-monitorian-cli set contrast "MONITOR\\DISPLAY1\\4&12345678&0&UID1" -5
+# Set brightness and contrast together
+monitorian-cli set --brightness 50 --contrast 70
 ```
 
 ### Examples
@@ -47,16 +44,16 @@ monitorian-cli set contrast "MONITOR\\DISPLAY1\\4&12345678&0&UID1" -5
 monitorian-cli list
 
 # Get brightness from all monitors
-monitorian-cli get brightness
+monitorian-cli get -b
 
 # Get contrast from all monitors
-monitorian-cli get contrast
+monitorian-cli get -c
 
 # Set brightness for all monitors to 50%
-monitorian-cli set brightness 50
+monitorian-cli set -b 50
 
 # Set contrast for all monitors to 75%
-monitorian-cli set contrast 75
+monitorian-cli set -c 75
 ```
 
 ## Output Format
